@@ -1,4 +1,5 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request, jsonify
+import requests
 
 app = Flask(__name__)
 
@@ -80,7 +81,6 @@ HTML = """
 </div>
 
 <script>
-const API_KEY = "{{ api_key }}";
 let map = null;
 let marker = null;
 
@@ -92,89 +92,46 @@ async function lookup() {
     document.getElementById('result').style.display = 'none';
     document.getElementById('loading').style.display = 'block';
 
-    const headers = {
-        "Authorization": "Basic " + btoa(API_KEY + ":")
-    };
-
     try {
-        let data;
-
-        // Try direct number lookup first
-        const directRes = await fetch(
-            `https://api.company-information.service.gov.uk/company/${query.toUpperCase()}`,
-            { headers }
-        );
-
-        if (directRes.ok) {
-            data = await directRes.json();
-        } else {
-            // Fall back to name search
-            const searchRes = await fetch(
-                `https://api.company-information.service.gov.uk/search/companies?q=${encodeURIComponent(query)}&items_per_page=1`,
-                { headers }
-            );
-            const searchData = await searchRes.json();
-            if (!searchData.items || searchData.items.length === 0) {
-                throw new Error("Company not found.");
-            }
-            // Get full company details
-            const companyNumber = searchData.items[0].company_number;
-            const detailRes = await fetch(
-                `https://api.company-information.service.gov.uk/company/${companyNumber}`,
-                { headers }
-            );
-            data = await detailRes.json();
-        }
-
+        const response = await fetch('/lookup?q=' + encodeURIComponent(query));
+        const data = await response.json();
         document.getElementById('loading').style.display = 'none';
 
-        const addr = data.registered_office_address || {};
-        const addressParts = [
-            addr.address_line_1, addr.address_line_2,
-            addr.locality, addr.region, addr.postal_code, addr.country
-        ].filter(Boolean);
-        const addressStr = addressParts.join(", ") || "Address not available";
+        if (data.error) {
+            document.getElementById('error').textContent = data.error;
+            document.getElementById('error').style.display = 'block';
+            return;
+        }
 
-        document.getElementById('companyName').textContent = data.company_name || "Unknown";
-        document.getElementById('companyNumber').textContent = data.company_number || "N/A";
-        document.getElementById('companyType').textContent = (data.company_type || "N/A").replace(/-/g, " ");
-        document.getElementById('incorporated').textContent = data.date_of_creation || "N/A";
-        document.getElementById('address').textContent = addressStr;
+        document.getElementById('companyName').textContent = data.name;
+        document.getElementById('companyNumber').textContent = data.number;
+        document.getElementById('companyType').textContent = data.type;
+        document.getElementById('incorporated').textContent = data.incorporated || 'N/A';
+        document.getElementById('address').textContent = data.address;
 
-        const status = (data.company_status || "unknown").replace(/-/g, " ");
         const badge = document.getElementById('statusBadge');
-        badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-        badge.className = 'badge ' + (status.includes('active') ? 'active' : status.includes('dissolved') ? 'dissolved' : 'other');
+        badge.textContent = data.status;
+        badge.className = 'badge ' + (data.status.toLowerCase().includes('active') ? 'active' : data.status.toLowerCase().includes('dissolved') ? 'dissolved' : 'other');
 
         document.getElementById('result').style.display = 'block';
 
-        // Geocode with Nominatim
-        const geoRes = await fetch(
-            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addressStr)}&format=json&limit=1`,
-            { headers: { "User-Agent": "CompanyTraceUK/1.0" } }
-        );
-        const geoData = await geoRes.json();
-
-        if (geoData.length > 0) {
-            const lat = parseFloat(geoData[0].lat);
-            const lng = parseFloat(geoData[0].lon);
-
+        if (data.lat && data.lng) {
             if (!map) {
-                map = L.map('map').setView([lat, lng], 15);
+                map = L.map('map').setView([data.lat, data.lng], 15);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '© OpenStreetMap contributors'
                 }).addTo(map);
             } else {
-                map.setView([lat, lng], 15);
+                map.setView([data.lat, data.lng], 15);
                 if (marker) map.removeLayer(marker);
             }
-            marker = L.marker([lat, lng]).addTo(map)
-                .bindPopup('<b>' + (data.company_name || '') + '</b><br>' + addressStr).openPopup();
+            marker = L.marker([data.lat, data.lng]).addTo(map)
+                .bindPopup('<b>' + data.name + '</b><br>' + data.address).openPopup();
         }
 
     } catch (e) {
         document.getElementById('loading').style.display = 'none';
-        document.getElementById('error').textContent = e.message || 'Something went wrong. Please try again.';
+        document.getElementById('error').textContent = 'Something went wrong. Please try again.';
         document.getElementById('error').style.display = 'block';
     }
 }
@@ -187,6 +144,77 @@ document.getElementById('query').addEventListener('keypress', function(e) {
 </html>
 """
 
+def geocode_address(address):
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {"q": address, "format": "json", "limit": 1}
+        headers = {"User-Agent": "CompanyTraceUK/1.0"}
+        r = requests.get(url, params=params, headers=headers, timeout=5)
+        results = r.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    except:
+        pass
+    return None, None
+
+
 @app.route("/")
 def home():
-    return render_template_string(HTML, api_key=COMPANIES_HOUSE_API_KEY)
+    return render_template_string(HTML)
+
+
+@app.route("/lookup")
+def lookup():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "Please enter a company name or number."})
+
+    auth = (COMPANIES_HOUSE_API_KEY, "")
+
+    # Try direct company number lookup first
+    r = requests.get(
+        f"https://api.company-information.service.gov.uk/company/{query.upper()}",
+        auth=auth, timeout=10
+    )
+    if r.status_code == 200:
+        data = r.json()
+    else:
+        # Fall back to name search
+        r = requests.get(
+            "https://api.company-information.service.gov.uk/search/companies",
+            params={"q": query, "items_per_page": 1},
+            auth=auth, timeout=10
+        )
+        if r.status_code != 200 or not r.json().get("items"):
+            return jsonify({"error": "Company not found. Try a different name or number."})
+        # Get full details
+        company_number = r.json()["items"][0]["company_number"]
+        r2 = requests.get(
+            f"https://api.company-information.service.gov.uk/company/{company_number}",
+            auth=auth, timeout=10
+        )
+        data = r2.json()
+
+    addr = data.get("registered_office_address") or {}
+    address_parts = [
+        addr.get("address_line_1", ""),
+        addr.get("address_line_2", ""),
+        addr.get("locality", ""),
+        addr.get("region", ""),
+        addr.get("postal_code", ""),
+        addr.get("country", ""),
+    ]
+    address_str = ", ".join(p for p in address_parts if p)
+
+    lat, lng = geocode_address(address_str)
+
+    return jsonify({
+        "name": data.get("company_name", "Unknown"),
+        "number": data.get("company_number", "N/A"),
+        "type": data.get("company_type", "N/A").replace("-", " ").title(),
+        "status": data.get("company_status", "Unknown").replace("-", " ").title(),
+        "incorporated": data.get("date_of_creation", ""),
+        "address": address_str or "Address not available",
+        "lat": lat,
+        "lng": lng,
+    })
