@@ -1,7 +1,7 @@
 import subprocess
 
 print("Pushing to GitHub...")
-subprocess.run(["git", "add", "Website.py", "deploy.py"])
+subprocess.run(["git", "add", "Website.py", "deploy.py", "README.md"])
 subprocess.run(["git", "commit", "-m", "auto deploy"])
 subprocess.run(["git", "push"])
 

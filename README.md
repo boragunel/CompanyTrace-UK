@@ -65,6 +65,6 @@ You type a company name or number into the website and click Search. Your browse
 
 - **Companies House API key expires or hits rate limit** — if the key is revoked or too many requests are made, all searches will fail
 - **Render free tier goes to sleep** — after 15 minutes of inactivity the server sleeps, causing the first request to take ~50 seconds to wake up
-- **Nominatim fails** — it's a free OpenStreetMap service which can be slow or return no results for unusual addresses, meaning the map pin won't appear
+- **Nominatim fails** — it's a free OpenStreetMap service which can be slow or return no results for unusual addresses; the geocoder falls back to postcode then country, but the pin may still not appear for very obscure addresses
 - **unpkg.com goes down** — this is where `Website.py` loads Leaflet.js from; if it's unavailable the map won't load at all
 - **GitHub/Render or local/GitHub synchronization issues** — both links in the deployment chain need to work correctly for website updates to go live
