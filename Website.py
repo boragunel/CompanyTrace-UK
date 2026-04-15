@@ -219,7 +219,7 @@ def lookup():
     return jsonify({
         "name": data.get("company_name", "Unknown"),
         "number": data.get("company_number", "N/A"),
-        "type": data.get("company_type", "N/A").replace("-", " ").title(),
+        "type": (data.get("company_type") or data.get("type", "N/A")).replace("-", " ").title(),
         "status": data.get("company_status", "Unknown").replace("-", " ").title(),
         "incorporated": data.get("date_of_creation", ""),
         "address": address_str or "Address not available",
