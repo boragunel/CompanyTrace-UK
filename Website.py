@@ -145,16 +145,24 @@ document.getElementById('query').addEventListener('keypress', function(e) {
 """
 
 def geocode_address(address):
-    try:
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {"q": address, "format": "json", "limit": 1}
-        headers = {"User-Agent": "CompanyTraceUK/1.0"}
-        r = requests.get(url, params=params, headers=headers, timeout=5)
-        results = r.json()
-        if results:
-            return float(results[0]["lat"]), float(results[0]["lon"])
-    except:
-        pass
+    headers = {"User-Agent": "CompanyTraceUK/1.0"}
+    # Try full address first, then fall back to just postcode
+    queries = [address]
+    parts = [p.strip() for p in address.split(",")]
+    if len(parts) >= 2:
+        queries.append(parts[-2] + ", " + parts[-1])  # postcode + country
+    queries.append(parts[-1])  # just country as last resort
+
+    for query in queries:
+        try:
+            url = "https://nominatim.openstreetmap.org/search"
+            params = {"q": query, "format": "json", "limit": 1, "countrycodes": "gb"}
+            r = requests.get(url, params=params, headers=headers, timeout=5)
+            results = r.json()
+            if results:
+                return float(results[0]["lat"]), float(results[0]["lon"])
+        except:
+            pass
     return None, None
 
 
